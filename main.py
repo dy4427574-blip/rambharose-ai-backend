@@ -11,7 +11,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ADMIN_SECRET = "ramadmin@123"
+ADMIN_SECRET = "deshraj@9302418380"
 KEYS_FILE = "keys.json"
 
 def load_keys():
