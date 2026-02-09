@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, Form
 from fastapi.middleware.cors import CORSMiddleware
 import random
 
@@ -14,29 +14,16 @@ app.add_middleware(
 VIP_KEY = "$mahakal"
 
 @app.get("/")
-def home():
+def root():
     return {"status": "Rambharose AI backend running"}
 
 @app.post("/predict")
-async def predict(
-    file: UploadFile = File(...),
-    key: str = Form(...)
-):
+def predict(key: str = Form(...)):
     if key != VIP_KEY:
         return {"error": "Invalid VIP key"}
 
-    # AI-style Big/Small probability logic
-    weight = random.random()
-
-    if weight > 0.55:
-        prediction = "BIG"
-        confidence = round(60 + weight * 20, 2)
-    else:
-        prediction = "SMALL"
-        confidence = round(60 + (1 - weight) * 20, 2)
+    prediction = random.choice(["BIG", "SMALL"])
 
     return {
-        "prediction": prediction,
-        "confidence": f"{confidence}%",
-        "risk": "Medium"
+        "prediction": prediction
     }
