@@ -1,38 +1,25 @@
 from fastapi import FastAPI, Form, HTTPException
 import os
 import time
-import random
-from datetime import datetime
 
-app = FastAPI(
-    title="DY Gamer Prediction",
-    version="1.0"
-)
+app = FastAPI(title="DY Gamer Prediction", version="1.0")
 
-# ===============================
+# =====================
 # CONFIG
-# ===============================
-ADMIN_SECRET = os.getenv("ADMIN_SECRET")
+# =====================
+ADMIN_SECRET = os.getenv("ADMIN_SECRET")  # Render env variable
 
 if not ADMIN_SECRET:
-    raise RuntimeError("ADMIN_SECRET not set in environment variables")
+    raise RuntimeError("ADMIN_SECRET not set in environment")
 
-# ===============================
-# IN-MEMORY STORAGE (TEMP)
-# ===============================
-KEY_DB = {}  
+# In-memory key store (abhi simple rakhenge)
+KEYS = {}  
 # format:
-# key: {
-#   "type": "Premium",
-#   "expiry": "2026-02-10",
-#   "limit": 10,
-#   "used": 0,
-#   "active": True
-# }
+# key: { "active": True, "limit": 10, "used": 0 }
 
-# ===============================
-# BASIC ROUTES
-# ===============================
+# =====================
+# BASIC
+# =====================
 @app.get("/")
 def root():
     return {"status": "DY Gamer Prediction API Running"}
@@ -41,32 +28,28 @@ def root():
 def health():
     return {"status": "ok", "time": time.time()}
 
-# ===============================
-# ADMIN ROUTES
-# ===============================
+# =====================
+# ADMIN
+# =====================
 @app.post("/admin/add-key")
 def add_key(
     admin_secret: str = Form(...),
     key: str = Form(...),
-    type: str = Form(...),
-    expiry: str = Form(...),
     limit: int = Form(...)
 ):
     if admin_secret != ADMIN_SECRET:
         raise HTTPException(status_code=403, detail="Invalid admin secret")
 
-    KEY_DB[key] = {
-        "type": type,
-        "expiry": expiry,
+    KEYS[key] = {
+        "active": True,
         "limit": limit,
-        "used": 0,
-        "active": True
+        "used": 0
     }
 
     return {
-        "status": "success",
-        "message": "Key added",
-        "key": key
+        "status": "key added",
+        "key": key,
+        "limit": limit
     }
 
 
@@ -78,43 +61,37 @@ def disable_key(
     if admin_secret != ADMIN_SECRET:
         raise HTTPException(status_code=403, detail="Invalid admin secret")
 
-    if key not in KEY_DB:
+    if key not in KEYS:
         raise HTTPException(status_code=404, detail="Key not found")
 
-    KEY_DB[key]["active"] = False
+    KEYS[key]["active"] = False
+    return {"status": "key disabled", "key": key}
 
-    return {
-        "status": "success",
-        "message": "Key disabled",
-        "key": key
-    }
-
-# ===============================
-# PREDICTION ROUTE
-# ===============================
+# =====================
+# PREDICTION
+# =====================
 @app.post("/predict")
 def predict(key: str = Form(...)):
-    if key not in KEY_DB:
-        raise HTTPException(status_code=401, detail="Invalid key")
+    if key not in KEYS:
+        raise HTTPException(status_code=403, detail="Invalid key")
 
-    data = KEY_DB[key]
+    key_data = KEYS[key]
 
-    if not data["active"]:
+    if not key_data["active"]:
         raise HTTPException(status_code=403, detail="Key disabled")
 
-    if data["used"] >= data["limit"]:
-        raise HTTPException(status_code=403, detail="Usage limit reached")
+    if key_data["used"] >= key_data["limit"]:
+        raise HTTPException(status_code=403, detail="Key limit exceeded")
 
-    if datetime.today().date() > datetime.fromisoformat(data["expiry"]).date():
-        raise HTTPException(status_code=403, detail="Key expired")
+    key_data["used"] += 1
 
-    data["used"] += 1
-
-    prediction = random.choice(["BIG", "SMALL"])
+    # ---- LOGIC (temporary manual bias, not random) ----
+    prediction = "BIG"  # abhi manual logic
+    confidence = "medium"
 
     return {
         "prediction": prediction,
-        "confidence": "medium",
-        "used": data["used"],
-        "remaining": data["limit"] - data["used"]
+        "confidence": confidence,
+        "used": key_data["used"],
+        "limit": key_data["limit"]
     }
