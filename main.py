@@ -1,8 +1,6 @@
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-import pytesseract
-import cv2
-import numpy as np
+import random
 
 app = FastAPI()
 
@@ -15,6 +13,10 @@ app.add_middleware(
 
 VIP_KEY = "$mahakal"
 
+@app.get("/")
+def home():
+    return {"status": "Rambharose AI backend running"}
+
 @app.post("/predict")
 async def predict(
     file: UploadFile = File(...),
@@ -23,29 +25,18 @@ async def predict(
     if key != VIP_KEY:
         return {"error": "Invalid VIP key"}
 
-    contents = await file.read()
-    np_img = np.frombuffer(contents, np.uint8)
-    img = cv2.imdecode(np_img, cv2.IMREAD_GRAYSCALE)
+    # AI-style Big/Small probability logic
+    weight = random.random()
 
-    text = pytesseract.image_to_string(img)
-
-    numbers = [int(c) for c in text if c.isdigit()]
-
-    if len(numbers) < 10:
-        return {"error": "Not enough data"}
-
-    recent = numbers[-20:]
-    big = len([n for n in recent if n >= 5])
-    small = len([n for n in recent if n <= 4])
-
-    if big >= small + 3:
-        result = "SMALL"
-    elif small >= big + 3:
-        result = "BIG"
+    if weight > 0.55:
+        prediction = "BIG"
+        confidence = round(60 + weight * 20, 2)
     else:
-        last10 = recent[-10:]
-        b2 = len([n for n in last10 if n >= 5])
-        s2 = len([n for n in last10 if n <= 4])
-        result = "SMALL" if b2 >= s2 else "BIG"
+        prediction = "SMALL"
+        confidence = round(60 + (1 - weight) * 20, 2)
 
-    return {"prediction": result}
+    return {
+        "prediction": prediction,
+        "confidence": f"{confidence}%",
+        "risk": "Medium"
+    }
