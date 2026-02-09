@@ -1,97 +1,79 @@
-from fastapi import FastAPI, Form, HTTPException
-import os
-import time
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from PIL import Image
+import pytesseract
+import cv2
+import numpy as np
+import io
 
-app = FastAPI(title="DY Gamer Prediction", version="1.0")
+app = FastAPI(title="DY Gamer Image Predictor", version="2.0")
 
-# =====================
-# CONFIG
-# =====================
-ADMIN_SECRET = os.getenv("ADMIN_SECRET")  # Render env variable
-
-if not ADMIN_SECRET:
-    raise RuntimeError("ADMIN_SECRET not set in environment")
-
-# In-memory key store (abhi simple rakhenge)
-KEYS = {}  
-# format:
-# key: { "active": True, "limit": 10, "used": 0 }
-
-# =====================
-# BASIC
-# =====================
 @app.get("/")
 def root():
-    return {"status": "DY Gamer Prediction API Running"}
+    return {"status": "Image Prediction API Running"}
 
-@app.get("/health")
-def health():
-    return {"status": "ok", "time": time.time()}
+# ---------- HELPERS ----------
 
-# =====================
-# ADMIN
-# =====================
-@app.post("/admin/add-key")
-def add_key(
-    admin_secret: str = Form(...),
-    key: str = Form(...),
-    limit: int = Form(...)
-):
-    if admin_secret != ADMIN_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid admin secret")
+def number_to_big_small(n: int):
+    return "BIG" if n >= 5 else "SMALL"
 
-    KEYS[key] = {
-        "active": True,
-        "limit": limit,
-        "used": 0
-    }
+def analyze(numbers):
+    sizes = [number_to_big_small(n) for n in numbers]
 
-    return {
-        "status": "key added",
-        "key": key,
-        "limit": limit
-    }
+    big = sizes.count("BIG")
+    small = sizes.count("SMALL")
 
+    # streak
+    streak = 1
+    for i in range(len(sizes) - 1, 0, -1):
+        if sizes[i] == sizes[i - 1]:
+            streak += 1
+        else:
+            break
 
-@app.post("/admin/disable-key")
-def disable_key(
-    admin_secret: str = Form(...),
-    key: str = Form(...)
-):
-    if admin_secret != ADMIN_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid admin secret")
-
-    if key not in KEYS:
-        raise HTTPException(status_code=404, detail="Key not found")
-
-    KEYS[key]["active"] = False
-    return {"status": "key disabled", "key": key}
-
-# =====================
-# PREDICTION
-# =====================
-@app.post("/predict")
-def predict(key: str = Form(...)):
-    if key not in KEYS:
-        raise HTTPException(status_code=403, detail="Invalid key")
-
-    key_data = KEYS[key]
-
-    if not key_data["active"]:
-        raise HTTPException(status_code=403, detail="Key disabled")
-
-    if key_data["used"] >= key_data["limit"]:
-        raise HTTPException(status_code=403, detail="Key limit exceeded")
-
-    key_data["used"] += 1
-
-    # ---- LOGIC (temporary manual bias, not random) ----
-    prediction = "BIG"  # abhi manual logic
-    confidence = "medium"
+    # decision (simple but logical)
+    if sizes[-1] == "SMALL" and small > big:
+        prediction = "BIG"
+    elif sizes[-1] == "BIG" and big > small:
+        prediction = "SMALL"
+    else:
+        prediction = "BIG" if big < small else "SMALL"
 
     return {
         "prediction": prediction,
-        "confidence": confidence,
-        "used": key_data["used"],
-        "limit": key_data["limit"]
+        "confidence": f"{60 + abs(big - small)}%",
+        "stats": {
+            "big": big,
+            "small": small,
+            "last_streak": f"{sizes[-1]} x{streak}"
+        }
     }
+
+# ---------- MAIN IMAGE API ----------
+
+@app.post("/predict-from-image")
+async def predict_from_image(
+    key: str = Form(...),
+    image: UploadFile = File(...)
+):
+    contents = await image.read()
+    img = Image.open(io.BytesIO(contents)).convert("L")
+
+    img_np = np.array(img)
+    img_np = cv2.threshold(img_np, 150, 255, cv2.THRESH_BINARY)[1]
+
+    text = pytesseract.image_to_string(img_np)
+
+    numbers = []
+    for word in text.split():
+        if word.isdigit():
+            n = int(word)
+            if 0 <= n <= 9:
+                numbers.append(n)
+
+    if len(numbers) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Screenshot me enough numbers nahi mile"
+        )
+
+    return analyze(numbers[-50:])
