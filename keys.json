@@ -1,0 +1,9 @@
+{
+  "$mahakal": {
+    "active": true,
+    "type": "premium",
+    "expiry": "2026-12-31",
+    "limit": 9999,
+    "used": 0
+  }
+}
