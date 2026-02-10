@@ -1,17 +1,15 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from PIL import Image
+from PIL import Image, ImageEnhance
+import pytesseract
+import cv2
 import numpy as np
-import easyocr
-import io
 import os
+import re
+from collections import Counter
 
-app = FastAPI(
-    title="DY Gamer Prediction",
-    version="EASYOCR-1.0"
-)
+app = FastAPI(title="DY Gamer Prediction - Image AI")
 
-# ---------------- CORS ----------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,117 +17,82 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------- CONFIG ----------------
 ADMIN_KEY = os.getenv("ADMIN_KEY")
-if not ADMIN_KEY:
-    print("ADMIN_KEY not set")
 
-# ---------------- OCR INIT (ONCE) ----------------
-reader = easyocr.Reader(['en'], gpu=False)
+# ---------------- UTILS ----------------
 
-# ---------------- RULES ----------------
-def size_from_number(n):
+def preprocess_image(img: Image.Image):
+    img = img.convert("L")  # grayscale
+    enhancer = ImageEnhance.Contrast(img)
+    img = enhancer.enhance(2.5)
+    img_np = np.array(img)
+    img_np = cv2.GaussianBlur(img_np, (5,5), 0)
+    _, img_np = cv2.threshold(img_np, 120, 255, cv2.THRESH_BINARY)
+    return img_np
+
+def extract_numbers(img_np):
+    text = pytesseract.image_to_string(img_np, config="--psm 6 digits")
+    nums = re.findall(r"\b\d\b", text)
+    return [int(n) for n in nums]
+
+def size_of(n):
     return "BIG" if n >= 5 else "SMALL"
 
-def color_from_number(n):
+def color_of(n):
     if n in [1,3,7,9]:
         return "GREEN"
     if n in [2,4,6,8]:
         return "RED"
     return "VIOLET"
 
-# ---------------- DEEP BIG/SMALL ENGINE ----------------
-def deep_big_small(history):
-    history = history[:50]
-    sizes = [size_from_number(n) for n in history]
+def deep_analysis(history):
+    history = history[:40]
 
-    votes = {"BIG":0, "SMALL":0}
-
+    sizes = [size_of(n) for n in history]
     big = sizes.count("BIG")
     small = sizes.count("SMALL")
 
-    # balance pressure
-    if big > small:
-        votes["SMALL"] += 2
-    elif small > big:
-        votes["BIG"] += 2
+    # pressure logic
+    target_size = "BIG" if small > big else "SMALL"
 
-    # streak
+    # streak break
     streak = 1
     for i in range(1, len(sizes)):
         if sizes[i] == sizes[0]:
             streak += 1
         else:
             break
-
     if streak >= 3:
-        votes["BIG" if sizes[0]=="SMALL" else "SMALL"] += 2
-    else:
-        votes[sizes[0]] += 1
+        target_size = "BIG" if sizes[0]=="SMALL" else "SMALL"
 
-    # final size
-    if votes["BIG"] > votes["SMALL"]:
-        final_size = "BIG"
-    elif votes["SMALL"] > votes["BIG"]:
-        final_size = "SMALL"
-    else:
-        final_size = "BIG" if sizes[0]=="SMALL" else "SMALL"
-
-    # number selection (non-random)
-    if final_size == "BIG":
-        pool = [5,6,7,8,9]
-    else:
-        pool = [0,1,2,3,4]
-
-    last_num = history[0]
-    pool = [n for n in pool if n != last_num]
+    pool = list(range(5,10)) if target_size=="BIG" else list(range(0,5))
+    freq = Counter(history)
+    pool.sort(key=lambda x: freq.get(x,0))
 
     number = pool[0]
-    color = color_from_number(number)
-
-    return number, final_size, color
-
-# ---------------- IMAGE → NUMBERS ----------------
-def extract_numbers_easyocr(img: Image.Image):
-    img_np = np.array(img)
-    results = reader.readtext(img_np, detail=0)
-
-    numbers = []
-    for txt in results:
-        if txt.isdigit():
-            n = int(txt)
-            if 0 <= n <= 9:
-                numbers.append(n)
-
-    return numbers
+    return number, target_size, color_of(number)
 
 # ---------------- API ----------------
+
 @app.post("/predict-from-image")
 async def predict_from_image(
     key: str = Form(...),
     image: UploadFile = File(...)
 ):
     if key != ADMIN_KEY:
-        raise HTTPException(status_code=401, detail="Invalid key")
+        raise HTTPException(status_code=401, detail="Invalid admin key")
 
-    if not image.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Invalid image")
+    img = Image.open(image.file)
+    processed = preprocess_image(img)
+    history = extract_numbers(processed)
 
-    data = await image.read()
-    img = Image.open(io.BytesIO(data)).convert("RGB")
-
-    if img.size[0] < 500 or img.size[1] < 700:
-        raise HTTPException(status_code=400, detail="Image too small")
-
-    numbers = extract_numbers_easyocr(img)
-
-    if len(numbers) < 15:
+    if len(history) < 10:
         raise HTTPException(
             status_code=400,
-            detail="Not enough numbers detected from image"
+            detail="Image unclear, history not enough"
         )
 
-    number, size, color = deep_big_small(numbers)
+    number, size, color = deep_analysis(history)
 
     return {
         "number": number,
