@@ -1,55 +1,62 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 import numpy as np
 import os
 
-app = FastAPI(title="DY Gamer Image Prediction AI")
+app = FastAPI(title="DY Gamer Prediction")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
+# 🔐 ADMIN KEY (ENVIRONMENT)
 ADMIN_KEY = os.getenv("ADMIN_KEY")
 
-def size_of(n):
-    return "BIG" if n >= 5 else "SMALL"
+if not ADMIN_KEY:
+    raise RuntimeError("ADMIN_KEY not set")
 
-def color_of(n):
-    if n in [1,3,7,9]:
-        return "GREEN"
-    if n in [2,4,6,8]:
-        return "RED"
-    return "VIOLET"
-
-def image_trend_analysis(img: Image.Image):
-    arr = np.array(img.convert("L"))
-    mean = arr.mean()
-
-    # brightness based pressure (works surprisingly well on charts)
-    if mean > 140:
-        target_size = "SMALL"
-        number = 3
-    else:
-        target_size = "BIG"
-        number = 7
-
-    return number, target_size, color_of(number)
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 @app.post("/predict-from-image")
 async def predict_from_image(
     key: str = Form(...),
     image: UploadFile = File(...)
 ):
+    # 🔒 Key check
     if key != ADMIN_KEY:
         raise HTTPException(status_code=401, detail="Invalid admin key")
 
-    img = Image.open(image.file)
+    # 📷 Load image
+    try:
+        img = Image.open(image.file).convert("RGB")
+    except:
+        raise HTTPException(status_code=400, detail="Invalid image")
 
-    number, size, color = image_trend_analysis(img)
+    arr = np.array(img)
+
+    # 🧠 ANALYSIS
+    brightness = arr.mean()
+    red_strength = arr[:, :, 0].mean()
+    green_strength = arr[:, :, 1].mean()
+
+    # 📊 SIZE LOGIC
+    if brightness < 120:
+        size = "BIG"
+    else:
+        size = "SMALL"
+
+    # 🎨 COLOR LOGIC
+    if green_strength > red_strength:
+        color = "GREEN"
+    else:
+        color = "RED"
+
+    # 🔢 NUMBER LOGIC (NOT RANDOM)
+    base_number = int((brightness + red_strength + green_strength) % 10)
+
+    # Fine tuning
+    if size == "BIG":
+        number = max(5, base_number)
+    else:
+        number = min(4, base_number)
 
     return {
         "number": number,
