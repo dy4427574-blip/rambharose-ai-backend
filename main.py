@@ -1,65 +1,55 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from PIL import Image
-import numpy as np
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+import requests
+from bs4 import BeautifulSoup
 import os
 
-app = FastAPI(title="DY Gamer Prediction")
+app = FastAPI(title="WinGo Prediction Mirror API")
 
-# 🔐 ADMIN KEY (ENVIRONMENT)
-ADMIN_KEY = os.getenv("ADMIN_KEY")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-if not ADMIN_KEY:
-    raise RuntimeError("ADMIN_KEY not set")
+BASE_URL = "https://wingoaisite.com/wingo-prediction/"
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-@app.post("/predict-from-image")
-async def predict_from_image(
-    key: str = Form(...),
-    image: UploadFile = File(...)
-):
-    # 🔒 Key check
-    if key != ADMIN_KEY:
-        raise HTTPException(status_code=401, detail="Invalid admin key")
-
-    # 📷 Load image
+def fetch_prediction(mode: str):
     try:
-        img = Image.open(image.file).convert("RGB")
-    except:
-        raise HTTPException(status_code=400, detail="Invalid image")
+        response = requests.get(BASE_URL, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
 
-    arr = np.array(img)
+        # ⚠️ IMPORTANT:
+        # Ye class name inspect karke change karna hoga
+        # Browser → Right click → Inspect → prediction div ka class copy karo
 
-    # 🧠 ANALYSIS
-    brightness = arr.mean()
-    red_strength = arr[:, :, 0].mean()
-    green_strength = arr[:, :, 1].mean()
+        if mode == "30s":
+            prediction_div = soup.find("div", {"data-mode": "30s"})
+        elif mode == "1min":
+            prediction_div = soup.find("div", {"data-mode": "1min"})
+        else:
+            raise HTTPException(status_code=400, detail="Invalid mode")
 
-    # 📊 SIZE LOGIC
-    if brightness < 120:
-        size = "BIG"
-    else:
-        size = "SMALL"
+        if not prediction_div:
+            raise HTTPException(status_code=500, detail="Prediction block not found")
 
-    # 🎨 COLOR LOGIC
-    if green_strength > red_strength:
-        color = "GREEN"
-    else:
-        color = "RED"
+        prediction_text = prediction_div.get_text(strip=True)
 
-    # 🔢 NUMBER LOGIC (NOT RANDOM)
-    base_number = int((brightness + red_strength + green_strength) % 10)
+        return {
+            "mode": mode,
+            "prediction": prediction_text
+        }
 
-    # Fine tuning
-    if size == "BIG":
-        number = max(5, base_number)
-    else:
-        number = min(4, base_number)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    return {
-        "number": number,
-        "size": size,
-        "color": color
-    }
+
+@app.get("/predict/30s")
+def get_30s_prediction():
+    return fetch_prediction("30s")
+
+
+@app.get("/predict/1min")
+def get_1min_prediction():
+    return fetch_prediction("1min")
