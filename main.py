@@ -1,36 +1,39 @@
-from fastapi import FastAPI, HTTPException
-from playwright.sync_api import sync_playwright
-import re
+from fastapi import FastAPI
+import requests
+from bs4 import BeautifulSoup
 
-app = FastAPI(title="DY Gamer Live Prediction")
+app = FastAPI()
 
 TARGET_URL = "https://wingoaisite.com/wingo-prediction/"
 
 @app.get("/")
-def root():
-    return {"status": "DY Gamer Live Scraper Running"}
+def home():
+    return {"status": "API Working"}
 
 @app.get("/live-prediction")
-def live_prediction():
+def get_prediction():
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
-            page = browser.new_page()
-            page.goto(TARGET_URL, timeout=60000)
-            page.wait_for_timeout(5000)  # wait JS load
-            
-            content = page.content()
-            browser.close()
+        response = requests.get(TARGET_URL, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
 
-        # Extract Color
-        color_match = re.search(r'Color.*?(Green|Red|Violet)', content, re.IGNORECASE)
-        size_match = re.search(r'(Big|Small)', content, re.IGNORECASE)
+        text = soup.get_text()
 
-        if not color_match or not size_match:
-            raise Exception("Prediction not found")
+        # Simple extraction logic
+        if "Green" in text:
+            color = "Green"
+        elif "Red" in text:
+            color = "Red"
+        elif "Violet" in text:
+            color = "Violet"
+        else:
+            color = "Not Found"
 
-        color = color_match.group(1).capitalize()
-        size = size_match.group(1).capitalize()
+        if "Big" in text:
+            size = "Big"
+        elif "Small" in text:
+            size = "Small"
+        else:
+            size = "Not Found"
 
         return {
             "color": color,
@@ -38,4 +41,4 @@ def live_prediction():
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"error": str(e)}
