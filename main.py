@@ -1,55 +1,41 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-import requests
-from bs4 import BeautifulSoup
-import os
+from playwright.sync_api import sync_playwright
+import re
 
-app = FastAPI(title="WinGo Prediction Mirror API")
+app = FastAPI(title="DY Gamer Live Prediction")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+TARGET_URL = "https://wingoaisite.com/wingo-prediction/"
 
-BASE_URL = "https://wingoaisite.com/wingo-prediction/"
+@app.get("/")
+def root():
+    return {"status": "DY Gamer Live Scraper Running"}
 
-def fetch_prediction(mode: str):
+@app.get("/live-prediction")
+def live_prediction():
     try:
-        response = requests.get(BASE_URL, timeout=10)
-        soup = BeautifulSoup(response.text, "html.parser")
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+            page = browser.new_page()
+            page.goto(TARGET_URL, timeout=60000)
+            page.wait_for_timeout(5000)  # wait JS load
+            
+            content = page.content()
+            browser.close()
 
-        # ⚠️ IMPORTANT:
-        # Ye class name inspect karke change karna hoga
-        # Browser → Right click → Inspect → prediction div ka class copy karo
+        # Extract Color
+        color_match = re.search(r'Color.*?(Green|Red|Violet)', content, re.IGNORECASE)
+        size_match = re.search(r'(Big|Small)', content, re.IGNORECASE)
 
-        if mode == "30s":
-            prediction_div = soup.find("div", {"data-mode": "30s"})
-        elif mode == "1min":
-            prediction_div = soup.find("div", {"data-mode": "1min"})
-        else:
-            raise HTTPException(status_code=400, detail="Invalid mode")
+        if not color_match or not size_match:
+            raise Exception("Prediction not found")
 
-        if not prediction_div:
-            raise HTTPException(status_code=500, detail="Prediction block not found")
-
-        prediction_text = prediction_div.get_text(strip=True)
+        color = color_match.group(1).capitalize()
+        size = size_match.group(1).capitalize()
 
         return {
-            "mode": mode,
-            "prediction": prediction_text
+            "color": color,
+            "size": size
         }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/predict/30s")
-def get_30s_prediction():
-    return fetch_prediction("30s")
-
-
-@app.get("/predict/1min")
-def get_1min_prediction():
-    return fetch_prediction("1min")
